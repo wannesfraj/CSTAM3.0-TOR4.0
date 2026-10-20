@@ -1,9 +1,5 @@
 export const UIController = (() => {
   const $ = id => document.getElementById(id);
-  let batteryTestInitialized = false;
-  let batteryTestPendingPct = null;
-  let batteryControlsBusy = false;
-  let batteryActualSoc = null;
 
   function log(message) {
     const element = document.createElement("div");
@@ -59,144 +55,6 @@ export const UIController = (() => {
     $("safetyStatus").hidden = !text;
   }
 
-  function updateBatteryIndicator(battery) {
-    const box = $("batteryBox");
-    if (!battery || !Number.isFinite(Number(battery.soc_pct))) { box.hidden = true; return; }
-    const soc = Math.max(0, Math.min(100, Number(battery.soc_pct)));
-    const reserve = Number(battery.config?.reserve_pct ?? 20);
-    box.hidden = false;
-    $("batteryPct").textContent = `${soc.toFixed(1)} %`;
-    const fill = $("batteryFill");
-    fill.style.width = `${soc}%`;
-    fill.className = soc < reserve ? "critical" : (soc < reserve + 10 ? "low" : "");
-    $("batteryReserve").style.left = `${reserve}%`;
-    const note = $("batteryNote");
-    if (soc < reserve) { note.textContent = `Sous le seuil de ${reserve.toFixed(0)} % : les nouveaux trajets seront refusés.`; note.className = "warn"; }
-    else { note.textContent = `Seuil de refus : ${reserve.toFixed(0)} %`; note.className = ""; }
-  }
-
-  function rebaseBatteryEstimate(estimate, soc, reserve, warningPct) {
-    if (!estimate || !Number.isFinite(Number(estimate.distance_m))) return estimate;
-    const reportedAfter = estimate.soc_after_pct === null || estimate.soc_after_pct === undefined
-      ? NaN : Number(estimate.soc_after_pct);
-    const reportedSoc = estimate.soc_pct === null || estimate.soc_pct === undefined
-      ? NaN : Number(estimate.soc_pct);
-    const reportedUse = estimate.required_pct === null || estimate.required_pct === undefined
-      ? NaN : Number(estimate.required_pct);
-    const consumption = Number.isFinite(reportedUse)
-      ? reportedUse
-      : (Number.isFinite(reportedSoc) && Number.isFinite(reportedAfter)
-        ? reportedSoc - reportedAfter : NaN);
-    if (!Number.isFinite(consumption) || consumption < 0) return estimate;
-
-    const arrival = soc - consumption;
-    const accepted = arrival >= reserve;
-    return {
-      ...estimate,
-      soc_pct: soc,
-      required_pct: consumption,
-      soc_after_pct: arrival,
-      accepted,
-      warning: accepted && arrival <= warningPct
-    };
-  }
-
-  function updateBattery(battery, estimate = null, navigation = null) {
-    updateBatteryIndicator(battery);
-    if (!battery || !Number.isFinite(Number(battery.soc_pct))) return;
-    const soc = Math.max(0, Math.min(100, Number(battery.soc_pct)));
-    batteryActualSoc = soc;
-    const reserve = Number(battery.config?.reserve_pct ?? 15);
-    const note = $("batteryNote");
-    if (soc < reserve) {
-      note.textContent = `Sous ${reserve.toFixed(0)} % : les nouveaux trajets seront refusés.`;
-      note.className = "warn";
-    } else if (soc <= 20) {
-      note.textContent = `Charge basse : une mission peut finir entre ${reserve.toFixed(0)} et 20 %.`;
-      note.className = "warn";
-    } else {
-      note.textContent = `Refus sous ${reserve.toFixed(0)} % · avertissement jusqu’à 20 %`;
-      note.className = "";
-    }
-
-    const activeStates = new Set(["goal_active", "planning", "path_ready", "following", "aligning", "approaching", "braking", "settling", "turning_to_path", "recovering", "waiting_for_route", "battery_returning"]);
-    const deliveryState = navigation?.delivery?.state;
-    const activeDelivery = ["planning", "approaching", "waiting", "returning"].includes(deliveryState);
-    const busy = activeDelivery || activeStates.has(navigation?.state);
-    const test = $("batteryTest");
-    const simulated = battery.simulated === true;
-    test.hidden = !simulated;
-    if (simulated) {
-      const slider = $("batteryTestSoc");
-      if (!batteryTestInitialized) {
-        slider.value = String(Math.round(soc));
-        $("batteryTestValue").textContent = `${slider.value} %`;
-        batteryTestInitialized = true;
-      }
-      if (batteryTestPendingPct !== null && Math.abs(soc - batteryTestPendingPct) < 0.15) {
-        slider.value = String(Math.round(soc));
-        $("batteryTestValue").textContent = `${slider.value} %`;
-        $("batteryTestStatus").textContent = `Charge de test appliquée : ${soc.toFixed(1)} %.`;
-        $("batteryTestStatus").className = "";
-        batteryTestPendingPct = null;
-      }
-      slider.disabled = busy;
-      if (batteryTestPendingPct !== null) slider.disabled = true;
-      if (busy && !batteryControlsBusy) $("batteryTestStatus").textContent = "Terminez ou arrêtez la mission avant de changer la charge.";
-      else if (!busy && batteryControlsBusy && batteryTestPendingPct === null)
-        $("batteryTestStatus").textContent = "Régler la charge avant de lancer une mission.";
-      batteryControlsBusy = busy;
-    }
-
-    const forecast = $("batteryEstimate");
-    const currentEstimate = estimate && !busy
-      ? rebaseBatteryEstimate(estimate, soc, reserve,
-          Number(battery.config?.warning_pct ?? 20))
-      : estimate;
-    if (!currentEstimate) {
-      forecast.textContent = "L\u2019estimation compl\u00e8te s\u2019affiche avant le d\u00e9part.";
-      forecast.className = "";
-    } else if (currentEstimate.soc_after_pct !== null && currentEstimate.soc_after_pct !== undefined
-      && Number.isFinite(Number(currentEstimate.distance_m))
-      && Number.isFinite(Number(currentEstimate.soc_after_pct))) {
-      const consumption = Number(currentEstimate.required_pct ??
-        (Number(currentEstimate.soc_pct) - Number(currentEstimate.soc_after_pct)));
-      const arrival = Number(currentEstimate.soc_after_pct);
-      forecast.textContent = `Parcours estim\u00e9 : ${Number(currentEstimate.distance_m).toFixed(1)} m \u00b7 consommation ${consumption.toFixed(1)} % \u00b7 arriv\u00e9e ${arrival.toFixed(1)} %.`;
-      if (currentEstimate.accepted === false) {
-        forecast.textContent += ` Mission refus\u00e9e : l\u2019arriv\u00e9e pr\u00e9vue est sous le seuil de ${reserve.toFixed(0)} %.`;
-        forecast.className = "error";
-      } else if (currentEstimate.warning) {
-        forecast.textContent += " Attention : rechargez apr\u00e8s cette mission.";
-        forecast.className = "warn";
-      } else forecast.className = "";
-    } else if (currentEstimate.accepted === false) {
-      forecast.textContent = currentEstimate.reason || "Mission refus\u00e9e : batterie insuffisante.";
-      forecast.className = "error";
-    } else {
-      forecast.textContent = currentEstimate.reason || "Estimation de batterie indisponible.";
-      forecast.className = currentEstimate.reason ? "error" : "";
-    }
-  }
-
-  function setBatteryTestPending(socPct) {
-    batteryTestPendingPct = Number(socPct);
-    $("batteryTestStatus").textContent = `Application de la charge à ${batteryTestPendingPct.toFixed(0)} %…`;
-    $("batteryTestStatus").className = "";
-    $("batteryTestSoc").disabled = true;
-  }
-
-  function batteryTestError(reason) {
-    batteryTestPendingPct = null;
-    $("batteryTestStatus").textContent = reason || "Impossible d’appliquer la charge de test.";
-    $("batteryTestStatus").className = "warn";
-    if (Number.isFinite(batteryActualSoc)) {
-      $("batteryTestSoc").value = String(Math.round(batteryActualSoc));
-      $("batteryTestValue").textContent = `${Math.round(batteryActualSoc)} %`;
-    }
-    $("batteryTestSoc").disabled = batteryControlsBusy;
-  }
-
   function setScanning(scanning) {
     $("scanBadge").textContent =
       scanning ? "SCAN ON" : "SCAN OFF";
@@ -232,9 +90,6 @@ export const UIController = (() => {
     setStatus,
     updateDrive,
     updateSafety,
-    updateBattery,
-    setBatteryTestPending,
-    batteryTestError,
     setScanning,
     updateRobot,
     updateCounters

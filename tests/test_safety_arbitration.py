@@ -42,8 +42,7 @@ class SafetyArbitrationTests(unittest.TestCase):
     def output(self, seconds):
         self.node.now_ns = int(seconds*1e9)
         self.node.last_scan = NS(header=NS(stamp=stamp(self.node.now_ns)), ranges=[], angle_min=0., angle_increment=0.)
-        self.node.last_odom = NS(header=NS(stamp=stamp(self.node.now_ns)),
-                                 twist=NS(twist=twist()))
+        self.node.last_odom = NS(header=NS(stamp=stamp(self.node.now_ns)))
         self.node.loop()
         value = self.node.pub.messages[-1]
         return value.linear.x, value.angular.z

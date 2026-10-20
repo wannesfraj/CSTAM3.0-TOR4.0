@@ -21,11 +21,6 @@ input[type=range]{width:100%}.readout{font:12px Consolas,monospace;line-height:1
 #drive{width:180px;margin:auto;display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
 #drive button{height:44px;touch-action:none;user-select:none}.up{grid-column:2}.left{grid-row:2}.stop{grid-column:2;grid-row:2}.right{grid-column:3;grid-row:2}.down{grid-column:2;grid-row:3}
 #driveStatus{margin-top:8px;line-height:1.5}#safetyStatus{color:var(--yellow);line-height:1.5;margin-top:8px}#viewStatus{max-width:340px;line-height:1.4}
-#batteryBox{margin-top:10px}.batRow{display:flex;justify-content:space-between;margin-bottom:4px}.batRow b{color:var(--text);font-size:13px}
-.batBar{position:relative;height:10px;background:var(--p2);border:1px solid var(--line);border-radius:6px;overflow:hidden}
-#batteryFill{height:100%;width:0;background:var(--green);transition:width .4s,background .4s}#batteryFill.low{background:var(--yellow)}#batteryFill.critical{background:var(--red)}
-#batteryReserve{position:absolute;top:0;bottom:0;width:2px;background:var(--text);opacity:.7}#batteryNote{margin-top:4px;line-height:1.4}#batteryNote.warn{color:var(--yellow)}
-#batteryTest{margin-top:10px;padding-top:9px;border-top:1px solid var(--line)}#batteryTest label{display:flex;justify-content:space-between;gap:8px;margin-bottom:3px}#batteryTest button{width:100%;margin-top:6px}#batteryTestStatus,#batteryEstimate{margin-top:5px;line-height:1.4}#batteryTestStatus.warn,#batteryEstimate.warn{color:var(--yellow)}#batteryEstimate.error{color:#ff93a0}
 #main{min-width:0;min-height:0;position:relative}
 #toolbar{height:45px;display:flex;align-items:center;gap:7px;padding:6px;background:#0b1118;border-bottom:1px solid var(--line)}#toolbar .spacer{flex:1}
 .view{position:absolute;inset:45px 0 0;display:none}.view.active{display:block}
@@ -66,17 +61,6 @@ button:disabled{opacity:.45;cursor:default}.feature-fields label{display:block;f
 <div class="small" lang="fr" style="margin-top:8px">Maintenez un bouton, W/A/S/D ou une flèche du clavier. Relâchez pour arrêter. ← / → font tourner le robot.</div>
 <div id="driveStatus" class="small" role="status" aria-live="polite">Connexion au robot en cours…</div>
 <div id="safetyStatus" class="small" role="status" aria-live="polite" hidden></div>
-<div id="batteryBox" class="small" role="group" aria-label="Batterie du robot" hidden>
-<div class="batRow"><span>Batterie</span><b id="batteryPct">--</b></div>
-<div class="batBar"><div id="batteryFill"></div><i id="batteryReserve"></i></div>
-<div id="batteryNote" role="status" aria-live="polite"></div>
-<div id="batteryTest" hidden>
-<label for="batteryTestSoc"><span>Charge pour les essais (simulation)</span><b id="batteryTestValue">100 %</b></label>
-<input id="batteryTestSoc" type="range" min="0" max="100" step="1" value="100" aria-describedby="batteryTestStatus">
-<div id="batteryTestStatus" role="status" aria-live="polite">La charge est appliquée quand vous relâchez le curseur.</div>
-<div id="batteryEstimate" role="status" aria-live="polite"></div>
-</div>
-</div>
 </section>
 
 <section>
@@ -201,7 +185,7 @@ Packets <span id="packets">0</span>
 </script>
 
 <script type="module">
-import "./js/app.js?v=battery-v3";
+import "./js/app.js?v=delivery-v8";
 </script>
 </body>
 </html>

@@ -108,28 +108,15 @@ class OccupancyGrid:
 
     def inflated_obstacles(self, margin_m: float) -> np.ndarray:
         blocked = self.data == 100
-        # Occupancy cells represent an area, not a point. Half a cell of
-        # padding keeps rasterization conservative at doorway boundaries.
-        radius=max(0.0,float(margin_m))+self.resolution*0.5
-        cells=int(math.ceil(radius/self.resolution))
+        cells = int(math.ceil(max(0.0, margin_m) / self.resolution))
         if cells == 0:
             return blocked.copy()
         inflated = blocked.copy()
-        # Inflate by a circular footprint. The old square dilation blocked
-        # diagonal cells almost sqrt(2) farther away than the configured
-        # clearance, closing doorways that were wide enough for the robot.
-        offsets=[]
-        for dy in range(-cells,cells+1):
-            for dx in range(-cells,cells+1):
-                if math.hypot(dx,dy)*self.resolution<=radius+1e-9:
-                    offsets.append((dx,dy))
-        for dx,dy in offsets:
-            src_y0=max(0,-dy);src_y1=min(self.size,self.size-dy)
-            src_x0=max(0,-dx);src_x1=min(self.size,self.size-dx)
-            if src_y0>=src_y1 or src_x0>=src_x1:continue
-            dst_y0=src_y0+dy;dst_y1=src_y1+dy
-            dst_x0=src_x0+dx;dst_x1=src_x1+dx
-            inflated[dst_y0:dst_y1,dst_x0:dst_x1]|=blocked[src_y0:src_y1,src_x0:src_x1]
+        occupied = np.argwhere(blocked)
+        for gy, gx in occupied:
+            y0, y1 = max(0, gy - cells), min(self.size, gy + cells + 1)
+            x0, x1 = max(0, gx - cells), min(self.size, gx + cells + 1)
+            inflated[y0:y1, x0:x1] = True
         return inflated
 
     def frontier_count(self) -> int:
@@ -161,10 +148,7 @@ class OccupancyGrid:
         return min(candidates)[1] if candidates else None
 
 
-def astar(grid: OccupancyGrid, start: tuple[int, int], goal: tuple[int, int], blocked: np.ndarray, allow_unknown: bool = True, unknown_cost: float = 1.15, edge_allowed=None, extra_cost: np.ndarray | None = None) -> list[tuple[int, int]]:
-    """A* on the grid. ``extra_cost`` (optional, same shape as the grid) adds a
-    per-cell penalty, e.g. near obstacles, so routes keep some distance when the
-    room allows it instead of touching the inflation border."""
+def astar(grid: OccupancyGrid, start: tuple[int, int], goal: tuple[int, int], blocked: np.ndarray, allow_unknown: bool = True, unknown_cost: float = 1.15, edge_allowed=None) -> list[tuple[int, int]]:
     if not grid.traversable(start, blocked, allow_unknown) or not grid.traversable(goal, blocked, allow_unknown):
         return []
     directions = ((1, 0), (-1, 0), (0, 1), (0, -1),
@@ -192,8 +176,6 @@ def astar(grid: OccupancyGrid, start: tuple[int, int], goal: tuple[int, int], bl
             step = math.sqrt(2.0) if dx and dy else 1.0
             if grid.data[nxt[1], nxt[0]] < 0:
                 step *= unknown_cost
-            if extra_cost is not None:
-                step += float(extra_cost[nxt[1], nxt[0]])
             new_cost = cost[current] + step
             if new_cost < cost.get(nxt, float("inf")):
                 cost[nxt] = new_cost

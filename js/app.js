@@ -5,7 +5,7 @@ import { GridRenderer } from "./grid-renderer.js?v=delivery-v8";
 import { ThreeDRenderer } from "./three-renderer.js?v=delivery-v8";
 import { MapExporter, readPNGMetadata, validateBundle, validateNavigation } from "./map-exporter.js?v=delivery-v8";
 import { createNavigationFeatures } from "./navigation-features.js?v=delivery-v8";
-import { UIController } from "./ui-controller.js?v=battery-v3";
+import { UIController } from "./ui-controller.js?v=delivery-v8";
 
 const $ = UIController.$;
 let MAX_LINEAR = 0.50;
@@ -23,7 +23,6 @@ let requestedView = "2d";
 let pendingOperation = null;
 let operationTimer = null;
 let activeMapId = null;
-let batteryPendingRequest = null;
 let features = null;
 const drivePointers = new Map();
 const driveKeys = new Map();
@@ -138,7 +137,6 @@ function showView(mode) {
 }
 
 function sendNavigationGoal(x, y, angleInput = $("goalYaw"), withoutAngle = false) {
-  if (batteryPendingRequest) { UIController.log("Attendez que la nouvelle charge soit appliquée avant de lancer le trajet."); return false; }
   if (pendingOperation) { UIController.log("Wait for the map operation to finish before navigating."); return false; }
   const angle = withoutAngle ? "" : angleInput.value.trim();
   if (!withoutAngle && (!angleInput.validity.valid || (angle !== "" && !Number.isFinite(Number(angle))))) {
@@ -177,10 +175,6 @@ function requestMapGoal(x, y) {
 function processMessage(message) {
   features?.receive(message);
   if (message?.type === "command_result") {
-    if (message.request_id === batteryPendingRequest) {
-      batteryPendingRequest = null;
-      UIController.batteryTestError(message.reason);
-    }
     finishOperation(message);
     UIController.log(message.reason || "Command rejected by the robot");
     return;
@@ -188,7 +182,6 @@ function processMessage(message) {
   if (!message || message.type !== "scan") return;
   finishOperation(message.operation);
   UIController.updateSafety(message.safety);
-  UIController.updateBattery(message.battery, message.navigation?.battery, message.navigation);
 
   if (!viewerConfigApplied && message.configuration) {
     const resolution = Number(message.configuration.map_resolution_m);
@@ -259,13 +252,7 @@ function processMessage(message) {
       outside_map_recovery: "Robot outside map - check localization",
       pathfinding_failed: "No route available - choose another goal",
       invalid_request: "Invalid goal - check coordinates and angle",
-      exploration_complete: "Exploration complete",
-      recovering: "Obstacle détecté : attente, puis recul/rotation et nouveau trajet",
-      waiting_for_battery: "En attente d’un niveau de batterie récent",
-      battery_insufficient: "Batterie trop faible : trajet refusé. Définissez une base ou rechargez.",
-      battery_returning: "Batterie faible : retour à la base",
-      battery_docked: "Base atteinte : recharge en cours",
-      battery_return_failed: "Retour à la base impossible : vérifiez le trajet et la carte"
+      exploration_complete: "Exploration complete"
     };
     $("navStatus").textContent = `Navigation: ${labels[state] ?? state}${safety}`;
     const signature = `${state}|${message.safety?.reason || ""}`;
@@ -417,20 +404,6 @@ function installDriveControls() {
 }
 
 function installUI() {
-  $("batteryTestSoc").oninput = event => {
-    $("batteryTestValue").textContent = `${Number(event.target.value).toFixed(0)} %`;
-  };
-  $("batteryTestSoc").onchange = event => {
-    const soc = Number(event.target.value);
-    const requestId = window.crypto?.randomUUID?.() || `battery-${Date.now()}`;
-    if (sendCommand({ type: "set_battery", soc_pct: soc, request_id: requestId })) {
-      batteryPendingRequest = requestId;
-      UIController.setBatteryTestPending(soc);
-    } else {
-      UIController.batteryTestError("Charge non appliquée : vérifiez la connexion au simulateur.");
-    }
-  };
-
   $("arrivalForm").onsubmit = event => {
     event.preventDefault();
     if (!pendingGoal) return;
@@ -498,7 +471,6 @@ function installUI() {
 
   $("explore").onclick = () => {
     releaseDrive();
-    if (batteryPendingRequest) { UIController.log("Attendez que la nouvelle charge soit appliquée avant de lancer l’exploration."); return; }
     if (sendCommand({ type: "nav_explore" }, "Exploration demandée")) {
       $("navStatus").textContent = "Exploration demandée : attente du robot…";
     }
@@ -640,13 +612,7 @@ function init() {
 
   installDriveControls();
   installUI();
-  features = createNavigationFeatures({ $, send: message => {
-    if (batteryPendingRequest && ["delivery_start", "delivery_return"].includes(message.type)) {
-      UIController.log("Attendez que la nouvelle charge soit appliquée avant de lancer la mission.");
-      return false;
-    }
-    return sendCommand(message);
-  }, log:UIController.log, robot:RobotState.get, releaseDrive,
+  features = createNavigationFeatures({ $, send: message => sendCommand(message), log:UIController.log, robot:RobotState.get, releaseDrive,
     overlays:value => { GridRenderer.setOverlays(value);ThreeDRenderer.setOverlays(value); }, pickView:() => $("mode2d").click() });
 
   window.addEventListener("resize", () => {

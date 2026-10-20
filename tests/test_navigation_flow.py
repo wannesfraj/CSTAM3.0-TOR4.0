@@ -16,7 +16,6 @@ ROOT = Path(__file__).parents[1]
 for package in ('fabtino_navigation', 'fabtino_core'):
     sys.path.insert(0, str(ROOT / 'ros_ws/src' / package))
 from fabtino_core.navigation.planner import OccupancyGrid
-from fabtino_core.navigation.zones import validate_config
 
 
 class Publisher:
@@ -120,74 +119,6 @@ class NavigationFlowTests(unittest.TestCase):
         self.local.goal_cb(goal)
         self.planner.plan()
         self.local.path_cb(self.planner.route_pub.messages[-1])
-
-    def configure_delivery_battery(self,soc):
-        self.mission.parameters['battery_required']=True
-        self.mission.pose=(0.0,0.0);self.mission.pose_yaw=0.0
-        self.mission.map=NS(info=NS(resolution=.1,origin=NS(position=NS(x=-5.,y=-5.))),data=[0]*10000)
-        self.mission.config=validate_config(dict(
-            zones=[dict(id='station',name='Station A',x=2.,y=0.,radius=.2),
-                   dict(id='station-b',name='Station B',x=4.,y=0.,radius=.2)],
-            base=dict(x=-3.,y=0.,yaw_deg=0.)))
-        self.mission.battery=dict(soc_pct=soc,config=dict(
-            capacity_wh=100.,wh_per_m=1.,wh_per_rad=0.,idle_w=0.,avg_speed_mps=1.,
-            reserve_pct=15.,warning_pct=20.,safety_factor=1.25,resample_m=1.,turn_deadband_rad=.25))
-        self.mission.battery_stamp=self.mission.seconds()
-
-    def test_delivery_estimates_all_stops_and_base_before_start_and_warns(self):
-        self.configure_delivery_battery(30.)
-        self.mission.start_delivery(dict(tasks=[dict(zone_id='station',delay_s=1.),
-                                                 dict(zone_id='station-b',delay_s=1.)],return_to_base=True))
-        report=json.loads(self.mission.status.messages[-1].data)['battery']
-        self.assertTrue(report['accepted'])
-        self.assertTrue(report['warning'])
-        self.assertGreater(report['distance_m'],8.)
-        self.assertEqual(report['wait_s'],2.)
-        self.assertGreaterEqual(report['soc_after_pct'],15.)
-        self.assertLessEqual(report['soc_after_pct'],20.)
-        self.assertGreater(self.mission.goal.x,-2.)
-
-    def test_delivery_below_15_percent_is_refused_and_robot_heads_to_base(self):
-        self.configure_delivery_battery(16.)
-        self.mission.start_delivery(dict(tasks=[dict(zone_id='station',delay_s=0.)],return_to_base=True))
-        status=json.loads(self.mission.status.messages[-1].data)
-        self.assertEqual(status['state'],'battery_returning')
-        self.assertFalse(status['battery']['accepted'])
-        self.assertLess(status['battery']['soc_after_pct'],15.)
-        self.assertEqual(self.mission.goal.x,-3.)
-
-    def test_two_stop_delivery_reaches_each_stop_then_returns_to_base(self):
-        self.configure_delivery_battery(30.)
-        self.mission.start_delivery(dict(tasks=[dict(zone_id='station',delay_s=0.),
-                                                 dict(zone_id='station-b',delay_s=0.)],return_to_base=True))
-        first=self.mission.goal
-        self.assertGreater(first.x,-2.)
-        self.mission.pose=(first.x,first.y)
-        self.mission.local_cb(msg(dict(goal_id=first.goal_id,state='goal_reached')))
-        self.mission.delivery_tick()
-        second=self.mission.goal
-        self.assertNotEqual(second.goal_id,first.goal_id)
-        self.assertGreater(second.x,first.x)
-        self.mission.pose=(second.x,second.y)
-        self.mission.local_cb(msg(dict(goal_id=second.goal_id,state='goal_reached')))
-        self.mission.delivery_tick()
-        base=self.mission.goal
-        self.assertAlmostEqual(base.x,-3.)
-        self.mission.pose=(base.x,base.y)
-        self.mission.local_cb(msg(dict(goal_id=base.goal_id,state='goal_reached')))
-        self.assertEqual(self.mission.delivery.state,'complete')
-        self.assertEqual(json.loads(self.mission.battery_request_pub.messages[-1].data)['type'],'charge')
-
-    def test_simulation_charge_command_is_forwarded_only_when_idle(self):
-        gateway=self.Gateway.__new__(self.Gateway)
-        gateway.operation=None;gateway.pub_battery_request=Publisher();gateway.latest={}
-        gateway.latest['battery']=json.dumps(dict(simulated=True))
-        gateway.latest['nav']=json.dumps(dict(state='idle',delivery=dict(state='idle')))
-        gateway.cmd('set_battery',dict(soc_pct=37,request_id='battery-test'))
-        self.assertEqual(json.loads(gateway.pub_battery_request.messages[-1].data),
-                         dict(type='set_soc',soc_pct=37.0))
-        gateway.latest['nav']=json.dumps(dict(state='following',delivery=dict(state='idle')))
-        with self.assertRaises(ValueError):gateway.cmd('set_battery',dict(soc_pct=50))
 
     def test_goal_keeps_exact_endpoint_and_orientation_through_all_callbacks(self):
         self.start(x=10.03, y=.02, yaw_deg=80)
@@ -299,19 +230,15 @@ class NavigationFlowTests(unittest.TestCase):
     def test_failed_path_clears_previous_motion(self):
         self.start()
         self.planner.grid.data.fill(100)
-        self.planner.grid.static_data.fill(100)
         self.planner.plan()
         self.local.path_cb(self.planner.route_pub.messages[-1])
         self.tick_local()
-        self.assertEqual(json.loads(self.planner.status.messages[-1].data)['state'], 'waiting_for_route')
-        self.assertIsNotNone(self.planner.goal)
+        self.assertEqual(json.loads(self.planner.status.messages[-1].data)['state'], 'pathfinding_failed')
         self.assertEqual(self.local.pub.messages[-1].twist.linear.x, 0)
         self.assertEqual(self.local.pub.messages[-1].twist.angular.z, 0)
 
     def test_route_keeps_robot_footprint_away_from_a_table(self):
-        obstacle=self.planner.grid.cell(5., 0.)
-        self.planner.grid.set_cell(obstacle, 100)
-        self.planner.grid.static_data[obstacle[1],obstacle[0]]=100
+        self.planner.grid.set_cell(self.planner.grid.cell(5., 0.), 100)
         self.start()
         self.assertTrue(self.planner.path)
         for cell in self.planner.path:
@@ -319,9 +246,7 @@ class NavigationFlowTests(unittest.TestCase):
             self.assertGreater(math.hypot(x-5.05, y-.05), .52)
 
     def test_goal_too_close_to_a_table_does_not_generate_motion(self):
-        obstacle=self.planner.grid.cell(5., 0.)
-        self.planner.grid.set_cell(obstacle, 100)
-        self.planner.grid.static_data[obstacle[1],obstacle[0]]=100
+        self.planner.grid.set_cell(self.planner.grid.cell(5., 0.), 100)
         self.start(x=5.2, y=0.)
         self.tick_local()
         self.assertFalse(self.planner.path)
