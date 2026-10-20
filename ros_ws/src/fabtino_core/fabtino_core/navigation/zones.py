@@ -71,8 +71,7 @@ def navigation_mask(grid,pose,zones,clearance):
     return blocked
 
 
-def approach_target(grid,pose,zones,zone_id,clearance=.6,buffer=.12,allow_unknown=True,
-                   obstacle_clearance=None):
+def approach_target(grid,pose,zones,zone_id,clearance=.6,buffer=.12,allow_unknown=True):
     """Choose the closest reachable cell outside the destination and other zones.
 
     Flood-fill once from the robot, preserving A*'s no-corner-cutting rule.
@@ -83,8 +82,7 @@ def approach_target(grid,pose,zones,zone_id,clearance=.6,buffer=.12,allow_unknow
     if zone is None:raise ValueError('Delivery zone no longer exists')
     start=grid.cell(*pose[:2])
     if point_denied(*pose[:2],zones,clearance):raise ValueError('Robot has no safe start outside denied zones and obstacles')
-    obstacle_clearance=clearance if obstacle_clearance is None else float(obstacle_clearance)
-    blocked=grid.inflated_obstacles(obstacle_clearance)|zone_mask(grid,zones,clearance)
+    blocked=navigation_mask(grid,pose,zones,clearance)
     if start is None or not grid.traversable(start,blocked,allow_unknown):
         raise ValueError('Robot has no safe start outside denied zones and obstacles')
     reached=np.zeros_like(blocked,dtype=bool);reached[start[1],start[0]]=True
