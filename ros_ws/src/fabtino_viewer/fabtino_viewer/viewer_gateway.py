@@ -58,6 +58,7 @@ class ViewerGateway(Node):
             2,
         )
         self.pub_req = self.create_publisher(String, '/navigation/request', 10)
+        self.pub_battery_request = self.create_publisher(String, '/battery/request', 10)
 
         self.create_subscription(
             Odometry, '/fabtino/odometry/filtered',
@@ -81,6 +82,10 @@ class ViewerGateway(Node):
         self.create_subscription(
             String, '/fabtino/safety_status',
             lambda msg: self.latest.__setitem__('safety', msg.data), 10,
+        )
+        self.create_subscription(
+            String, '/fabtino/battery',
+            lambda msg: self.latest.__setitem__('battery', msg.data), 10,
         )
         self.create_subscription(
             String, '/navigation/mission_status',
@@ -196,6 +201,33 @@ class ViewerGateway(Node):
                 and typ in ('drive','nav_goal','nav_explore','delivery_start','delivery_return','set_navigation_config')
                 and (typ!='drive' or payload.get('v') or payload.get('omega'))):
             raise ValueError('Map/reset operation in progress; wait for confirmation before moving')
+        if typ=='set_battery':
+            battery=self.latest.get('battery')
+            if battery:
+                try:battery=json.loads(battery) if isinstance(battery,str) else battery
+                except (ValueError,TypeError):battery=None
+            if not isinstance(battery,dict) or not battery.get('simulated'):
+                raise ValueError('Battery level can only be changed in the simulator')
+            try:soc=float(payload.get('soc_pct'))
+            except (TypeError,ValueError):raise ValueError('Battery charge must be between 0 and 100%')
+            if not math.isfinite(soc) or not 0.0<=soc<=100.0:
+                raise ValueError('Battery charge must be between 0 and 100%')
+            navigation=self.latest.get('nav')
+            if isinstance(navigation,str):
+                try:navigation=json.loads(navigation)
+                except (ValueError,TypeError):navigation={}
+            navigation=navigation if isinstance(navigation,dict) else {}
+            delivery=navigation.get('delivery') if isinstance(navigation.get('delivery'),dict) else {}
+            active_delivery=delivery.get('state') in ('planning','approaching','waiting','returning')
+            active_goal=navigation.get('state') in (
+                'goal_active','planning','path_ready','following','aligning','approaching',
+                'braking','settling','turning_to_path','recovering','waiting_for_route',
+                'battery_returning')
+            if active_delivery or active_goal:
+                raise ValueError('Stop the current task before changing the simulated battery')
+            msg=String();msg.data=json.dumps({'type':'set_soc','soc_pct':soc})
+            self.pub_battery_request.publish(msg)
+            return
         if typ in ('set_navigation_config','delivery_start','delivery_return'):
             request=dict(payload,type='configure' if typ=='set_navigation_config' else typ)
             if typ=='set_navigation_config':request.update(validate_config(payload))
@@ -291,6 +323,11 @@ class ViewerGateway(Node):
         if self.latest.get('safety'):
             try:
                 packet['safety'] = json.loads(self.latest['safety'])
+            except Exception:
+                pass
+        if self.latest.get('battery'):
+            try:
+                packet['battery'] = json.loads(self.latest['battery'])
             except Exception:
                 pass
 
